@@ -1,0 +1,8 @@
+__pycache__/
+data/
+longformer_ckpt/
+my_env_name/
+pretrain_data/preprocess/
+meta_data.json
+dev.json
+train.json
