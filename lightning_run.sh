@@ -9,9 +9,9 @@ CUDA_VISIBLE_DEVICES=1,4,6,7 python lightning_pretrain.py \
     --gradient_accumulation_steps 8 \
     --preprocessing_num_workers 8 \
     --dataloader_num_workers 8  \
-    --batch_size 16 \
+    --batch_size 1 \
     --learning_rate 5e-5 \
     --temp 0.05 \
-    --device 4 \
+    --device 1 \
     --fp16 \
     --fix_word_embedding

@@ -4,7 +4,7 @@ import json
 from typing import Dict, Any, Union, List
 
 
-PATH = "/Users/Nora_Hallqvist/Code/qb-fm-labs-research/projects/sequential-transformer/RecFormer/data/amt_bins.json"
+PATH = "data/amt_bins.json"
 
 def get_date_bins() -> Dict[str, str]: 
     return {

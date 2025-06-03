@@ -2,8 +2,6 @@ from torch.optim import AdamW
 import torch.nn as nn
 from torch.optim.lr_scheduler import LambdaLR
 
-
-
 def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
     """ Create a schedule with a learning rate that decreases linearly after
     linearly increasing during a warmup period.
@@ -17,7 +15,6 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
         )
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-
 
 
 def create_optimizer_and_scheduler(model: nn.Module, num_train_optimization_steps, args):

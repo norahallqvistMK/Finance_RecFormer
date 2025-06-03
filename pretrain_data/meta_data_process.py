@@ -49,7 +49,7 @@ def extract_meta_data_from_file(file_path: str) -> Dict[int, Dict[str, Any]]:
         first_row = group.iloc[0]
         # Convert numpy types to native Python types using .item() where available
         type_metadata = {
-            key: first_row[col].item() if hasattr(first_row[col], 'item') else first_row[col]
+            int(key): first_row[col].item() if hasattr(first_row[col], 'item') else first_row[col]
             for key, col in available_columns.items()
         }
         meta_data[transaction_type_id] = type_metadata
