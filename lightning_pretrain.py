@@ -99,7 +99,7 @@ def main():
             pool_func = pool.imap(func=_par_tokenize_doc, iterable=item_attrs.items())
             doc_tuples = list(tqdm(pool_func, total=len(item_attrs), ncols=100, desc=f'[Tokenize] {path_corpus}'))
 
-        tokenized_items = {item_id: [input_ids, token_type_ids] for item_id, input_ids, token_type_ids in doc_tuples}
+        tokenized_items = {int(item_id): [input_ids, token_type_ids] for item_id, input_ids, token_type_ids in doc_tuples}
         with open(path_tokenized_items, 'w') as f:
             json.dump(tokenized_items, f)
 
