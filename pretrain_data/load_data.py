@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from helper import save_metadata_to_json
-
+import os
 
 def get_amt_bins(df: pd.DataFrame, number_bins: int = 10000, min_amt: int = 0, max_amt: int = 10000):
     """
@@ -49,16 +49,24 @@ def save_raw_data():
     """Reads raw data from Hugging Face and saves it locally as CSV files."""
     splits = {'train': 'credit_card_transaction_train.csv', 'test': 'credit_card_transaction_test.csv'}
     base_url = "hf://datasets/pointe77/credit-card-transaction/"
-    
+    save_dir = '../data'  # Directory to save the raw data
+
+    # Ensure the directory exists
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        print(f"Directory '{save_dir}' created.")
+
     # Read the data
     df_train = pd.read_csv(base_url + splits["train"])
     df_test = pd.read_csv(base_url + splits["test"])
-    
+
     # Save raw data
-    df_train.to_csv('../data/credit_card_transaction_train_raw.csv', index=False)
-    df_test.to_csv('../data/credit_card_transaction_test_raw.csv', index=False)
-    
-    print("Raw data saved as '../data/credit_card_transaction_train_raw.csv' and '../data/credit_card_transaction_test_raw.csv'")
+    train_path = os.path.join(save_dir, 'credit_card_transaction_train_raw.csv')
+    test_path = os.path.join(save_dir, 'credit_card_transaction_test_raw.csv')
+    df_train.to_csv(train_path, index=False)
+    df_test.to_csv(test_path, index=False)
+
+    print(f"Raw data saved as '{train_path}' and '{test_path}'")
 
 def preprocess_and_save_data(input_path: str, output_path: str, drop_na: bool = True, verbose: bool = False):
     """
@@ -131,7 +139,7 @@ def preprocess_data(
 
 if __name__ == "__main__":
 
-    # save_raw_data()  # Save the raw files
+    save_raw_data()  # Save the raw files
 
     # Then, for processing:
     preprocess_and_save_data(

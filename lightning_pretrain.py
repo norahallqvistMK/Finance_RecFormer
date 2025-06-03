@@ -32,8 +32,8 @@ parser.add_argument('--dataloader_num_workers', type=int, default=2)
 parser.add_argument('--mlm_probability', type=float, default=0.15)
 parser.add_argument('--batch_size', type=int, default=2)
 parser.add_argument('--learning_rate', type=float, default=5e-5)
-parser.add_argument('--valid_step', type=int, default=2000)
-parser.add_argument('--log_step', type=int, default=2000)
+parser.add_argument('--valid_step', type=int, default=500)
+parser.add_argument('--log_step', type=int, default=100)
 parser.add_argument('--device', type=int, default=1)
 parser.add_argument('--fp16', action='store_true')
 parser.add_argument('--ckpt', type=str, default=None)
@@ -107,6 +107,8 @@ def main():
         tokenized_items = json.load(f)
     print(f'Successfully loaded {len(tokenized_items)} tokenized items.')
 
+    tokenized_items = {int(k): v for k, v in  tokenized_items.items()}
+
     data_collator = PretrainDataCollatorWithPadding(tokenizer, tokenized_items, mlm_probability=args.mlm_probability)
     train_data = ClickDataset(json.load(open(args.train_file)), data_collator)
     dev_data = ClickDataset(json.load(open(args.dev_file)), data_collator)
@@ -130,24 +132,25 @@ def main():
 
     model = LitWrapper(pytorch_model, learning_rate=args.learning_rate)
 
-    checkpoint_callback = ModelCheckpoint(save_top_k=5, monitor="accuracy", mode="max", filename="{epoch}-{accuracy:.4f}")
+    checkpoint_callback = ModelCheckpoint(save_top_k=1, monitor="accuracy", mode="max", filename="{epoch}-{accuracy:.4f}")
+
+    print("trainer being loaded")
     
     trainer = Trainer(accelerator="gpu",
                      max_epochs=args.num_train_epochs,
                      devices=args.device,
                      accumulate_grad_batches=args.gradient_accumulation_steps,
-                     val_check_interval=args.valid_step,
+                     val_check_interval= len(train_loader),
                      default_root_dir=args.output_dir,
                      gradient_clip_val=1.0,
-                     log_every_n_steps=args.log_step,
+                     log_every_n_steps=None,
                      precision=16 if args.fp16 else 32,
                      strategy='deepspeed_stage_2',
                      callbacks=[checkpoint_callback]
                      )
-
+    
+    print("trainer being fiteed")
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=dev_loader, ckpt_path=args.ckpt)
-
-
 
 if __name__ == "__main__":
     main()
