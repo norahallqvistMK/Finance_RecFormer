@@ -7,9 +7,10 @@ from pathlib import Path
 from argparse import ArgumentParser
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, precision_score, recall_score, f1_score
 
 from pytorch_lightning import seed_everything
+from functools import partial
 
 from utils import read_json, AverageMeterSet
 from optimization import create_optimizer_and_scheduler
@@ -20,29 +21,37 @@ from dataloader import RecformerEvalDatasetFraud, RecformerTrainDatasetFraud
 
 def load_data(args):
     """Load fraud detection data"""
-    train = read_json(os.path.join(args.data_path, args.train_file), True)
-    val = read_json(os.path.join(args.data_path, args.dev_file), True)
-    test = read_json(os.path.join(args.data_path, args.test_file), True)
-    item_meta_dict = json.load(open(os.path.join(args.data_path, args.meta_file)))
-    
-    item2id = read_json(os.path.join(args.data_path, args.item2id_file))
-    id2item = {v:k for k, v in item2id.items()}
+    train = json.load(open(os.path.join(args.data_path, args.train_file)))
+    val = json.load(open(os.path.join(args.data_path, args.dev_file)))
+    test = json.load(open(os.path.join(args.data_path, args.test_file)))
+    item_meta_dict = json.load(open(os.path.join("pretrain_data", args.meta_file)))
 
-    item_meta_dict_filted = dict()
-    for k, v in item_meta_dict.items():
-        if k in item2id:
-            item_meta_dict_filted[k] = v
+    return train, val, test, item_meta_dict
 
-    return train, val, test, item_meta_dict_filted, item2id, id2item
+# tokenizer_glb: RecformerTokenizer = None
 
 
-tokenizer_glb: RecformerTokenizer = None
+tokenizer_glb = None
+
+def _init_worker(model_name_or_path, num_labels):
+    """
+    Initializes the global tokenizer in each worker process.
+    """
+    global tokenizer_glb
+    config = RecformerConfig.from_pretrained(model_name_or_path)
+    config.max_attr_num = 3
+    config.max_attr_length = 32
+    config.max_item_embeddings = 51
+    config.attention_window = [64] * 12
+    config.max_token_num = 1024
+    config.num_labels = num_labels  # For binary classification
+    tokenizer_glb = RecformerTokenizer.from_pretrained(model_name_or_path, config)
+    print(f'Worker initialized tokenizer: {model_name_or_path}')
+
 def _par_tokenize_doc(doc):
-    """Tokenize item attributes in parallel"""
     item_id, item_attr = doc
     input_ids, token_type_ids = tokenizer_glb.encode_item(item_attr)
     return item_id, input_ids, token_type_ids
-
 
 def compute_fraud_metrics(predictions, labels):
     """Compute fraud detection metrics"""
@@ -163,9 +172,9 @@ def main():
     parser.add_argument('--output_dir', type=str, default='checkpoints')
     parser.add_argument('--ckpt', type=str, default='best_fraud_model.bin')
     parser.add_argument('--model_name_or_path', type=str, default='allenai/longformer-base-4096')
-    parser.add_argument('--train_file', type=str, default='train_fraud.json')
-    parser.add_argument('--dev_file', type=str, default='val_fraud.json')
-    parser.add_argument('--test_file', type=str, default='test_fraud.json')
+    parser.add_argument('--train_file', type=str, default='train.json')
+    parser.add_argument('--dev_file', type=str, default='dev.json')
+    parser.add_argument('--test_file', type=str, default='test.json')
     parser.add_argument('--item2id_file', type=str, default='smap.json')
     parser.add_argument('--meta_file', type=str, default='meta_data.json')
 
@@ -198,7 +207,8 @@ def main():
     args.device = torch.device('cuda:{}'.format(args.device)) if args.device >= 0 else torch.device('cpu')
 
     # Load data
-    train, val, test, item_meta_dict, item2id, id2item = load_data(args)
+    train, val, test, item_meta_dict = load_data(args)
+
     print(f"Loaded {len(train)} train, {len(val)} val, {len(test)} test samples")
 
     # Setup model config
@@ -208,14 +218,12 @@ def main():
     config.max_item_embeddings = 51
     config.attention_window = [64] * 12
     config.max_token_num = 1024
-    config.item_num = len(item2id)
     config.num_labels = args.num_labels  # For binary classification
     config.classifier_dropout = args.dropout
-    
     tokenizer = RecformerTokenizer.from_pretrained(args.model_name_or_path, config)
-    
-    global tokenizer_glb
-    tokenizer_glb = tokenizer
+
+    # global tokenizer_glb
+    # tokenizer_glb = tokenizer
 
     # Setup paths
     path_corpus = Path(args.data_path)
@@ -233,10 +241,16 @@ def main():
         print(f'[Preprocessor] Use cache: {path_tokenized_items}')
     else:
         print(f'Loading attribute data {path_corpus}')
-        pool = Pool(processes=args.preprocessing_num_workers)
-        pool_func = pool.imap(func=_par_tokenize_doc, iterable=item_meta_dict.items())
-        doc_tuples = list(tqdm(pool_func, total=len(item_meta_dict), ncols=100, desc=f'[Tokenize] {path_corpus}'))
-        tokenized_items = {item2id[item_id]: [input_ids, token_type_ids] for item_id, input_ids, token_type_ids in doc_tuples}
+        with Pool(processes=args.preprocessing_num_workers, initializer=_init_worker, initargs=(args.model_name_or_path, args.num_labels)) as pool:
+            pool_func = pool.imap(func=_par_tokenize_doc, iterable=item_meta_dict.items())
+            doc_tuples = list(tqdm(pool_func, total=len(item_meta_dict), ncols=100, desc=f'[Tokenize] {path_corpus}'))
+        # pool = Pool(processes=args.preprocessing_num_workers)
+        
+        # tokenize_func = partial(_par_tokenize_doc, tokenizer_glb=tokenizer)
+        # pool_func = pool.imap(func=tokenize_func, iterable=item_meta_dict.items())
+
+        # doc_tuples = list(tqdm(pool_func, total=len(item_meta_dict), ncols=100, desc=f'[Tokenize] {path_corpus}'))
+        tokenized_items = {item_id: [input_ids, token_type_ids] for item_id, input_ids, token_type_ids in doc_tuples}
         pool.close()
         pool.join()
         torch.save(tokenized_items, path_tokenized_items)
@@ -244,9 +258,11 @@ def main():
     tokenized_items = torch.load(path_tokenized_items)
     print(f'Successfully load {len(tokenized_items)} tokenized items.')
 
+    tokenized_items = {int(k): v for k, v in item_meta_dict.items()}
+
     # Create data collators for fraud detection
     finetune_data_collator = FinetuneDataCollatorWithPaddingFraud(tokenizer, tokenized_items)
-    eval_data_collator = EvalDataCollatorWithPaddingFraud(tokenizer, tokenized_items, return_tuple=False)
+    eval_data_collator = EvalDataCollatorWithPaddingFraud(tokenizer, tokenized_items)
 
     # Create datasets
     train_data = RecformerEvalDatasetFraud(train, collator=finetune_data_collator)

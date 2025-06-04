@@ -1,5 +1,5 @@
 python finetune_fraud.py \
-    --pretrain_ckpt pretrain_ckpt/fraud_pretrain_ckpt.bin \
+    --pretrain_ckpt longformer_ckpt/longformer-base-4096.bin \
     --data_path finetune_data \
     --num_train_epochs 2 \
     --batch_size 2 \
