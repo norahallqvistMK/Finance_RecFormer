@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from helper import save_metadata_to_json
 import os
+import pickle
 
 def get_amt_bins(df: pd.DataFrame, number_bins: int = 10000, min_amt: int = 0, max_amt: int = 10000):
     """
@@ -68,23 +69,66 @@ def save_raw_data():
 
     print(f"Raw data saved as '{train_path}' and '{test_path}'")
 
-def preprocess_and_save_data(input_path: str, output_path: str, drop_na: bool = True, verbose: bool = False):
-    """
-    Reads raw data from input_path, processes it, and saves processed data to output_path.
-    """
-    df = pd.read_csv(input_path)
-    df_processed = preprocess_data(df, drop_na, verbose)
-    df_processed.to_csv(output_path, index=False)
-    if verbose:
-        print(f"Processed data saved to {output_path}")
 
-def preprocess_data(
+def fit_global_label_encoder(train_path: str, test_path: str, save_dir: str = '../data'):
+    """
+    Fit label encoder on combined train and test data for transaction signatures.
+    
+    Parameters:
+    - train_path: Path to training data
+    - test_path: Path to test data
+    - save_dir: Directory to save the fitted encoder
+    
+    Returns:
+    - Fitted LabelEncoder and amount bins information
+    """
+    print("Fitting global label encoder on combined dataset...")
+    
+    # Read both datasets
+    df_train = pd.read_csv(train_path)
+    df_test = pd.read_csv(test_path)
+    
+    # Combine datasets for fitting
+    df_combined = pd.concat([df_train, df_test], ignore_index=True)
+    
+    # Get amount bins from combined data
+    amt_bins, bin_labels = get_amt_bins(df_combined)
+    
+    # Process combined data to get all possible transaction signatures
+    df_combined_processed = preprocess_data_without_encoding(df_combined, amt_bins, bin_labels)
+    
+    # Fit label encoder on all unique transaction signatures
+    le = LabelEncoder()
+    all_signatures = df_combined_processed["transaction_signature"].unique()
+    le.fit(all_signatures)
+    
+    # Save the fitted encoder and bins
+    encoder_path = os.path.join(save_dir, 'transaction_type_encoder.pkl')
+    bins_path = os.path.join(save_dir, 'amt_bins_info.pkl')
+    
+    with open(encoder_path, 'wb') as f:
+        pickle.dump(le, f)
+    
+    with open(bins_path, 'wb') as f:
+        pickle.dump((amt_bins, bin_labels), f)
+    
+    print(f"Global label encoder saved to {encoder_path}")
+    print(f"Amount bins info saved to {bins_path}")
+    print(f"Total unique transaction types: {len(le.classes_)}")
+    
+    return le, amt_bins, bin_labels
+
+
+def preprocess_data_without_encoding(
     df: pd.DataFrame, 
+    amt_bins: np.ndarray,
+    bin_labels: list,
     drop_na: bool = True,
     verbose: bool = False
 ) -> pd.DataFrame:
-    """(Your preprocess_data function as given above)"""
-    
+    """
+    Preprocess data without applying label encoding (for fitting the encoder).
+    """
     required_columns = ['trans_date_trans_time', 'amt', 'merchant']
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
@@ -109,8 +153,6 @@ def preprocess_data(
     if not pd.api.types.is_numeric_dtype(df_processed['amt']):
         df_processed['amt'] = pd.to_numeric(df_processed['amt'], errors='coerce')
     
-    amt_bins, bin_labels = get_amt_bins(df)
-
     df_processed["amt_bin"] = pd.cut(
         df_processed["amt"].abs(),
         bins=amt_bins,
@@ -129,28 +171,96 @@ def preprocess_data(
     concat_parts = [df_processed[feature].astype(str).replace('nan', 'missing') for feature in features_for_transaction_type]
     df_processed["transaction_signature"] = pd.concat(concat_parts, axis=1).agg('_'.join, axis=1)
     
-    le = LabelEncoder()
-    df_processed["transaction_type_id"] = le.fit_transform(df_processed["transaction_signature"])
+    return df_processed
+
+
+def preprocess_data(
+    df: pd.DataFrame, 
+    label_encoder: LabelEncoder = None,
+    amt_bins: np.ndarray = None,
+    bin_labels: list = None,
+    drop_na: bool = True,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """
+    Preprocess data with pre-fitted label encoder.
+    """
+    df_processed = preprocess_data_without_encoding(df, amt_bins, bin_labels, drop_na, verbose)
+    
+    if label_encoder is not None:
+        # Apply the pre-fitted label encoder
+        df_processed["transaction_type_id"] = label_encoder.transform(df_processed["transaction_signature"])
     
     if verbose:
         print(f"Processed data shape: {df_processed.shape}")
     
     return df_processed
 
+
+def preprocess_and_save_data(
+    input_path: str, 
+    output_path: str, 
+    label_encoder: LabelEncoder,
+    amt_bins: np.ndarray,
+    bin_labels: list,
+    drop_na: bool = True, 
+    verbose: bool = False
+):
+    """
+    Reads raw data from input_path, processes it using pre-fitted encoder, and saves processed data to output_path.
+    """
+    df = pd.read_csv(input_path)
+    df_processed = preprocess_data(df, label_encoder, amt_bins, bin_labels, drop_na, verbose)
+    df_processed.to_csv(output_path, index=False)
+    if verbose:
+        print(f"Processed data saved to {output_path}")
+
+
+def load_fitted_encoder_and_bins(save_dir: str = '../data'):
+    """
+    Load the pre-fitted label encoder and amount bins.
+    """
+    encoder_path = os.path.join(save_dir, 'transaction_type_encoder.pkl')
+    bins_path = os.path.join(save_dir, 'amt_bins_info.pkl')
+    
+    with open(encoder_path, 'rb') as f:
+        label_encoder = pickle.load(f)
+    
+    with open(bins_path, 'rb') as f:
+        amt_bins, bin_labels = pickle.load(f)
+    
+    return label_encoder, amt_bins, bin_labels
+
+
 if __name__ == "__main__":
+    # Save the raw files
+    save_raw_data()
 
-    save_raw_data()  # Save the raw files
+    # Step 1: Fit global label encoder on combined dataset
+    label_encoder, amt_bins, bin_labels = fit_global_label_encoder(
+        train_path='../data/credit_card_transaction_train_raw.csv',
+        test_path='../data/credit_card_transaction_test_raw.csv'
+    )
 
-    # Then, for processing:
+    # Step 2: Process both datasets using the fitted encoder
     preprocess_and_save_data(
         input_path='../data/credit_card_transaction_train_raw.csv',
         output_path='../data/credit_card_transaction_train_processed.csv',
+        label_encoder=label_encoder,
+        amt_bins=amt_bins,
+        bin_labels=bin_labels,
         drop_na=True,
         verbose=True
     )
+    
     preprocess_and_save_data(
         input_path='../data/credit_card_transaction_test_raw.csv',
         output_path='../data/credit_card_transaction_test_processed.csv',
+        label_encoder=label_encoder,
+        amt_bins=amt_bins,
+        bin_labels=bin_labels,
         drop_na=True,
         verbose=True
     )
+    
+    print("Processing complete! Both train and test sets use consistent transaction_type_id encoding.")

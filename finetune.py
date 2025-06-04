@@ -242,6 +242,7 @@ def main():
     dev_loader = DataLoader(val_data, 
                             batch_size=args.batch_size, 
                             collate_fn=val_data.collate_fn)
+    
     test_loader = DataLoader(test_data, 
                             batch_size=args.batch_size, 
                             collate_fn=test_data.collate_fn)

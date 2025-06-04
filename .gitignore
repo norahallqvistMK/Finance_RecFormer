@@ -6,3 +6,4 @@ pretrain_data/preprocess/
 meta_data.json
 dev.json
 train.json
+test.json

@@ -63,5 +63,8 @@ def main():
     save_metadata_to_json(train_sequences, 'train.json')
     save_metadata_to_json(val_sequences, 'dev.json')
 
+    # input_file_path_test = '../data/credit_card_transaction_train_processed.csv'
+
+
 if __name__ == "__main__":
     main()
